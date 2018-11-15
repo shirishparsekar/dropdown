@@ -51,6 +51,7 @@
 
   var settings = {
     readonly: false,
+    minCount: 0,
     limitCount: Infinity,
     input: '<input type="text" maxLength="20" placeholder="搜索关键词或ID">',
     data: [],
@@ -74,13 +75,33 @@
     keyup: 'keyup.iui-dropdown'
   };
 
+  var ALERT_TIMEOUT_PERIOD = 1000;
+
   // 创建模板
   function createTemplate() {
     var isLabelMode = this.isLabelMode;
     var searchable = this.config.searchable;
     var templateSearch = searchable ? '<span class="dropdown-search">' + this.config.input + '</span>' : '';
 
-    return isLabelMode ? '<div class="dropdown-display-label"><div class="dropdown-chose-list">' + templateSearch + '</div></div><div class="dropdown-main">{{ul}}</div>' : '<a href="javascript:;" class="dropdown-display"><span class="dropdown-chose-list"></span><a href="javascript:;"  class="dropdown-clear-all">\xD7</a></a><div class="dropdown-main">' + templateSearch + '{{ul}}</div>';
+    return isLabelMode ? '<div class="dropdown-display-label"><div class="dropdown-chose-list">' + templateSearch + '</div></div><div class="dropdown-main">{{ul}}</div>' : '<a href="javascript:;" class="dropdown-display" tabindex="0"><span class="dropdown-chose-list"></span><a href="javascript:;"  class="dropdown-clear-all" tabindex="0">\xD7</a></a><div class="dropdown-main">' + templateSearch + '{{ul}}</div>';
+  }
+
+  // 小于minCount提示的元素
+  function minItemsAlert() {
+    var _dropdown = this;
+    var _config = _dropdown.config;
+    var $el = _dropdown.$el;
+    var $alert = $el.find('.dropdown-minItem-alert');
+    clearTimeout(_dropdown.itemCountAlertTimer);
+
+    if ($alert.length === 0) {
+      $alert = $('<div class="dropdown-minItem-alert">\u6700\u4f4e\u9009\u62e9' + _config.minCount + '\u4E2A</div>');
+    }
+
+    $el.append($alert);
+    _dropdown.itemCountAlertTimer = setTimeout(function () {
+      $el.find('.dropdown-minItem-alert').remove();
+    }, ALERT_TIMEOUT_PERIOD);
   }
 
   // 超出限制提示
@@ -89,16 +110,16 @@
     var _config = _dropdown.config;
     var $el = _dropdown.$el;
     var $alert = $el.find('.dropdown-maxItem-alert');
-    clearTimeout(_dropdown.maxItemAlertTimer);
+    clearTimeout(_dropdown.itemLimitAlertTimer);
 
     if ($alert.length === 0) {
       $alert = $('<div class="dropdown-maxItem-alert">\u6700\u591A\u53EF\u9009\u62E9' + _config.limitCount + '\u4E2A</div>');
     }
 
     $el.append($alert);
-    _dropdown.maxItemAlertTimer = setTimeout(function () {
+    _dropdown.itemLimitAlertTimer = setTimeout(function () {
       $el.find('.dropdown-maxItem-alert').remove();
-    }, 1000);
+    }, ALERT_TIMEOUT_PERIOD);
   }
 
   // select-option 转 ul-li
@@ -114,7 +135,8 @@
       return '<li class="dropdown-group" data-group-id="' + (groupId ? groupId[1] : '') + '">' + (groupName ? groupName[1] : '') + '</li>';
     });
     result = result.replace(/<option(.*?)<\/option>/gi, function (matcher) {
-      var value = /value="?([\w\u4E00-\u9FA5\uF900-\uFA2D]+)"?/.exec(matcher);
+      // var value = /value="?([\w\u4E00-\u9FA5\uF900-\uFA2D]+)"?/.exec(matcher);
+      var value = $(matcher).val();
       var name = />(.*)<\//.exec(matcher);
       // 强制要求html中使用selected/disabled，而不是selected="selected","disabled="disabled"
       var isSelected = matcher.indexOf('selected') > -1 ? true : false;
@@ -123,7 +145,7 @@
       var extendProps = matcher.replace(/data-(\w+)="?(.[^"]+)"?/g, function ($1) {
         extendAttr += $1 + ' '
       });
-      return '<li ' + (isDisabled ? ' disabled' : ' tabindex="0"') + ' data-value="' + (value ? value[1] : '') + '" class="dropdown-option ' + (isSelected ? 'dropdown-chose' : '') + '" ' + extendAttr + '>' + (name ? name[1] : '') + '</li>';
+      return '<li ' + (isDisabled ? ' disabled' : ' tabindex="0"') + ' data-value="' + (value || '') + '" class="dropdown-option ' + (isSelected ? 'dropdown-chose' : '') + '" ' + extendAttr + '>' + (name ? name[1] : '') + '</li>';
     });
 
     return result;
@@ -187,7 +209,7 @@
   }
 
   // select-option 转 object-data
-  // 
+  //
   function selectToObject(el) {
     var $select = el;
     var result = [];
@@ -313,6 +335,10 @@
 
       $select.find('option[value="' + value + '"]').prop('selected', hasSelected ? false : true);
 
+      if (hasSelected && _dropdown.selectAmount < _config.minCount) {
+        minItemsAlert.call(_dropdown);
+      }
+
       _dropdown.$choseList.find('.dropdown-selected').remove();
       _dropdown.$choseList.prepend(_dropdown.name.join(''));
       _dropdown.$el.find('.dropdown-display').attr('title', selectedName.join(','));
@@ -382,11 +408,18 @@
       return false;
     },
     clearAll: function (event) {
+      var _dropdown = this;
+      var _config = _dropdown.config;
       event && event.preventDefault();
       console.log(this)
       this.$choseList.find('.del').each(function (index, el) {
         $(el).trigger('click');
       });
+
+      if (_config.minCount > 0) {
+        minItemsAlert.call(_dropdown);
+      }
+
       this.$el.find('.dropdown-display').removeAttr('title');
       return false;
     }
@@ -400,7 +433,7 @@
     this.name = [];
     this.isSingleSelect = !this.$select.prop('multiple');
     this.selectAmount = 0;
-    this.maxItemAlertTimer = null;
+    this.itemLimitAlertTimer = null;
     this.isLabelMode = this.config.multipleMode === 'label';
     this.init();
   }
@@ -504,7 +537,7 @@
       // 按下上下键切换token
       $el.on(EVENT_SPACE.keydown, $.proxy(action.control, _this));
 
-      $el.on(EVENT_SPACE.click, '[tabindex]', $.proxy(_this.isSingleSelect ? action.singleChoose : action.multiChoose, _this));
+      $el.on(EVENT_SPACE.click, 'li[tabindex]', $.proxy(_this.isSingleSelect ? action.singleChoose : action.multiChoose, _this));
     },
     unbindEvent: function () {
       var _this = this;
